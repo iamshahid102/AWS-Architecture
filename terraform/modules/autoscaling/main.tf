@@ -31,6 +31,14 @@ resource "aws_autoscaling_group" "notes_crud" {
     version = var.launch_template_version
   }
 
+  instance_refresh {
+    strategy = "Rolling"
+    preferences {
+      min_healthy_percentage = 50
+      instance_warmup        = 180
+    }
+  }
+
   # Termination policies
   termination_policies = ["Default"]
 

@@ -35,7 +35,7 @@ root_volume_delete_on_termination = true
 root_volume_encrypted             = true
 root_volume_kms_key_id            = ""
 associate_public_ip               = true
-github_repo                       = ""
+github_repo                       = "https://github.com/iamshahid102/AWS-Architecture.git"
 github_branch                     = "main"
 
 # Disable standalone EC2 instance (use ASG instead)
