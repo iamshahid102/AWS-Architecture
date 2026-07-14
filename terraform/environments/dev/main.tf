@@ -107,29 +107,16 @@ module "security_group" {
 }
 
 # -----------------------------------------------------------
-# Application Load Balancer
+# Elastic IP for EC2 Instance (static public IP - Free Tier)
 # -----------------------------------------------------------
-module "alb" {
-  source = "../../modules/alb"
-
-  vpc_id                = module.vpc.vpc_id
-  public_subnet_ids     = module.subnets.public_subnet_ids
-  alb_security_group_id = module.security_group.alb_security_group_id
-  environment           = var.environment
-  owner                 = var.owner
-  acm_certificate_arn   = module.acm.certificate_arn
-}
-
-# -----------------------------------------------------------
-# ACM Certificate (DNS Validation via Route 53)
-# -----------------------------------------------------------
-module "acm" {
-  source = "../../modules/acm"
-
-  domain_name    = var.domain_name
-  hosted_zone_id = var.hosted_zone_id
-  environment    = var.environment
-  owner          = var.owner
+resource "aws_eip" "notes_crud" {
+  domain = "vpc"
+  tags = {
+    Name        = "${var.environment}-notes-crud-eip"
+    Environment = var.environment
+    Project     = "notes-crud"
+    ManagedBy   = "terraform"
+  }
 }
 
 # -----------------------------------------------------------
@@ -176,8 +163,21 @@ module "ec2" {
   github_branch                     = var.github_branch
   domain_name                       = var.domain_name
   ssl_email                         = var.ssl_email
-  create_instance                   = var.create_instance
-  instance_name                     = var.instance_name
+  db_host                           = split(":", module.rds.db_endpoint)[0]
+  db_port                           = tostring(module.rds.db_port)
+  db_user                           = var.db_username
+  db_password                       = var.db_password
+  db_name                           = var.db_name
+  create_instance                   = true
+  instance_name                     = "${var.environment}-notes-crud-instance"
+}
+
+# -----------------------------------------------------------
+# Elastic IP Association (static public IP for Free Tier)
+# -----------------------------------------------------------
+resource "aws_eip_association" "notes_crud" {
+  instance_id   = module.ec2.instance_id
+  allocation_id = aws_eip.notes_crud.id
 }
 
 # ============================================================
@@ -211,49 +211,5 @@ module "rds" {
   engine_version          = "15.17"
 }
 
-# ============================================================
-# PHASE 4: Auto Scaling Group
-# Free Tier: min=1, max=1, desired=1 (single instance)
-# ============================================================
 
-# -----------------------------------------------------------
-# Auto Scaling Group
-# -----------------------------------------------------------
-module "autoscaling" {
-  source = "../../modules/autoscaling"
 
-  vpc_zone_identifier = module.subnets.public_subnet_ids
-  environment         = var.environment
-  owner               = var.owner
-
-  launch_template_id      = module.ec2.launch_template_id
-  launch_template_version = module.ec2.launch_template_latest_version
-
-  min_size         = 2
-  max_size         = 2
-  desired_capacity = 2
-
-  # Health checks
-  health_check_type         = "ELB"
-  health_check_grace_period = 300
-
-  # ALB target group attachment
-  target_group_arns = [module.alb.target_group_arn]
-}
-
-# -----------------------------------------------------------
-# Route 53 Alias Record for Domain -> ALB
-# -----------------------------------------------------------
-resource "aws_route53_record" "domain_alias" {
-  count = var.domain_name != "" ? 1 : 0
-
-  name    = var.domain_name
-  type    = "A"
-  zone_id = var.hosted_zone_id
-
-  alias {
-    name                   = module.alb.alb_dns_name
-    zone_id                = module.alb.alb_zone_id
-    evaluate_target_health = true
-  }
-}

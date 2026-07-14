@@ -11,16 +11,33 @@ locals {
   }
 
   launch_template_name = "${var.environment}-notes-crud-lt-v2"
-
-  ubuntu_ami_filter = {
-    name   = "ubuntu/images/hvm-ssd-gpu/ubuntu-noble-24.04-amd64-server-*"
-    values = ["ubuntu/images/hvm-ssd-gpu/ubuntu-noble-24.04-amd64-server-*"]
-  }
 }
 
 # -----------------------------------------------------------
-# Data Source: Latest Ubuntu 24.04 LTS AMI
+# Data Source: Custom Notes CRUD AMI (built by Packer)
+# Falls back to Ubuntu 24.04 LTS if custom AMI not found
 # -----------------------------------------------------------
+data "aws_ami" "notes_crud_custom" {
+  count       = 1
+  most_recent = true
+  owners      = ["self"]
+
+  filter {
+    name   = "tag:Project"
+    values = ["notes-crud"]
+  }
+
+  filter {
+    name   = "tag:ManagedBy"
+    values = ["packer"]
+  }
+
+  filter {
+    name   = "state"
+    values = ["available"]
+  }
+}
+
 data "aws_ami" "ubuntu_2404" {
   most_recent = true
   owners      = ["099720109477"]
@@ -51,6 +68,9 @@ data "aws_ami" "ubuntu_2404" {
 # Renders userdata.sh with variable interpolation using templatefile()
 # -----------------------------------------------------------
 locals {
+  # Use custom AMI if available, otherwise fall back to Ubuntu 24.04
+  ami_id = try(data.aws_ami.notes_crud_custom[0].id, data.aws_ami.ubuntu_2404.id)
+
   user_data = templatefile("${path.module}/userdata.sh", {
     environment                = var.environment
     app_port                   = var.app_port
@@ -63,6 +83,11 @@ locals {
     github_branch              = var.github_branch
     domain_name                = var.domain_name
     ssl_email                  = var.ssl_email
+    db_host                    = var.db_host
+    db_port                    = var.db_port
+    db_user                    = var.db_user
+    db_password                = var.db_password
+    db_name                    = var.db_name
   })
 }
 
@@ -73,7 +98,7 @@ locals {
 resource "aws_launch_template" "notes_crud" {
   name_prefix   = local.launch_template_name
   description   = "Launch template for Notes CRUD Application (${var.environment}) - v2"
-  image_id      = data.aws_ami.ubuntu_2404.id
+  image_id      = local.ami_id
   instance_type = var.instance_type
   key_name      = var.key_name
 

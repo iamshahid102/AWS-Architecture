@@ -1,28 +1,32 @@
-name: Terraform Deploy
+name: Terraform Deploy (Manual)
 
 on:
   workflow_dispatch:
     inputs:
       action:
-        description: 'Terraform action'
+        description: 'Terraform action to execute'
         required: true
         type: choice
         options:
           - plan
           - apply
+          - destroy
 
 permissions:
   contents: read
   id-token: write
 
+env:
+  AWS_REGION: ap-south-1
+  TF_WORKING_DIR: ./terraform/environments/dev
+
 jobs:
-  terraform-plan:
-    name: Terraform Plan
+  terraform:
+    name: Terraform ${{ github.event.inputs.action }}
     runs-on: ubuntu-latest
-    if: github.event.inputs.action == 'plan'
     defaults:
       run:
-        working-directory: ./terraform/environments/dev
+        working-directory: ${{ env.TF_WORKING_DIR }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -32,7 +36,7 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
+          aws-region: ${{ env.AWS_REGION }}
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
@@ -44,49 +48,39 @@ jobs:
 
       - name: Terraform Plan
         id: plan
-        run: terraform plan -out=tfplan
+        if: github.event.inputs.action != 'destroy'
+        run: |
+          terraform plan -out=tfplan \
+            -var="db_password=${{ secrets.DB_PASSWORD }}" \
+            -var="aws_account_id=${{ secrets.AWS_ACCOUNT_ID }}"
 
-      - name: Upload Plan
-        uses: actions/upload-artifact@v4
-        with:
-          name: tfplan
-          path: ./terraform/environments/dev/tfplan
-
-  terraform-apply:
-    name: Terraform Apply
-    runs-on: ubuntu-latest
-    if: github.event.inputs.action == 'apply'
-    environment:
-      name: production
-      url: https://github.com/${{ github.repository }}/deployments
-    needs: terraform-plan
-    defaults:
-      run:
-        working-directory: ./terraform/environments/dev
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: 1.9.0
-
-      - name: Terraform Init
-        run: terraform init
-
-      - name: Download Plan
-        uses: actions/download-artifact@v4
-        with:
-          name: tfplan
-          path: .
+      - name: Terraform Destroy Plan
+        id: destroy-plan
+        if: github.event.inputs.action == 'destroy'
+        run: |
+          terraform plan -destroy -out=tfplan \
+            -var="db_password=${{ secrets.DB_PASSWORD }}" \
+            -var="aws_account_id=${{ secrets.AWS_ACCOUNT_ID }}"
 
       - name: Terraform Apply
-        run: terraform apply -auto-approve tfplan
+        if: github.event.inputs.action == 'apply'
+        run: |
+          terraform apply -auto-approve \
+            -var="db_password=${{ secrets.DB_PASSWORD }}" \
+            -var="aws_account_id=${{ secrets.AWS_ACCOUNT_ID }}" \
+            tfplan
+
+      - name: Terraform Destroy
+        if: github.event.inputs.action == 'destroy'
+        run: |
+          terraform apply -auto-approve \
+            -var="db_password=${{ secrets.DB_PASSWORD }}" \
+            -var="aws_account_id=${{ secrets.AWS_ACCOUNT_ID }}" \
+            tfplan
+
+      - name: Get Application URL
+        if: github.event.inputs.action == 'apply'
+        run: |
+          echo "=========================================="
+          echo "  Application URL: http://$(terraform output -raw eip_public_ip 2>/dev/null || echo 'unknown')"
+          echo "=========================================="

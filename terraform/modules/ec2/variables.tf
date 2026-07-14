@@ -155,6 +155,39 @@ variable "associate_public_ip" {
   default     = true
 }
 
+# -----------------------------------------------------------
+# Database Configuration
+# -----------------------------------------------------------
+variable "db_host" {
+  description = "RDS database host endpoint"
+  type        = string
+  default     = ""
+}
+
+variable "db_port" {
+  description = "RDS database port"
+  type        = string
+  default     = "5432"
+}
+
+variable "db_user" {
+  description = "RDS database username"
+  type        = string
+  default     = ""
+}
+
+variable "db_password" {
+  description = "RDS database password"
+  type        = string
+  default     = ""
+}
+
+variable "db_name" {
+  description = "RDS database name"
+  type        = string
+  default     = ""
+}
+
 variable "cloudwatch_agent_s3_bucket" {
   description = "S3 bucket for CloudWatch Agent config (optional)"
   type        = string

@@ -1,17 +1,16 @@
 #!/bin/bash
-set -euo pipefail
+# Notes CRUD EC2 bootstrap script
+# Designed for Terraform templatefile() interpolation
+# Shell-only variables use double-dollar {VAR_NAME} to escape from Terraform
 
-# Minimal user-data: only runtime startup tasks
-# Heavy lifting (Nginx, Node.js, PM2, Certbot, CloudWatch, SSM) baked into AMI via Packer
-
-exec > >(tee /var/log/user-data.log | logger -t user-data -s 2>/dev/console) 2>&1
+exec > /var/log/user-data.log 2>&1
 
 echo "=========================================="
 echo "Starting Notes CRUD EC2 Runtime Setup"
-echo "Timestamp: $$(date)"
+echo "Timestamp: $(date)"
 echo "=========================================="
 
-# Environment Variables (passed from Terraform template - these use $${var} for Terraform interpolation)
+# Terraform-substituted variables
 APP_PORT="${app_port}"
 ENVIRONMENT="${environment}"
 AWS_REGION="${aws_region}"
@@ -19,37 +18,67 @@ ENABLE_CLOUDWATCH_AGENT="${enable_cloudwatch_agent}"
 ENABLE_SSM_AGENT="${enable_ssm_agent}"
 GITHUB_REPO="${github_repo}"
 GITHUB_BRANCH="${github_branch}"
-DOMAIN_NAME="${domain_name}"
-SSL_EMAIL="${ssl_email}"
+DB_HOST="${db_host}"
+DB_PORT="${db_port}"
+DB_USER="${db_user}"
+DB_PASSWORD="${db_password}"
+DB_NAME="${db_name}"
 
 echo "Configuration:"
 echo "  App Port: $${APP_PORT}"
 echo "  Environment: $${ENVIRONMENT}"
 echo "  AWS Region: $${AWS_REGION}"
-echo "  GitHub Repo: $${GITHUB_REPO:-none}"
-echo "  Domain: $${DOMAIN_NAME:-none (self-signed)}"
+echo "  DB Host: $${DB_HOST}"
+
+# ----------------------------------------------------------
+# Install system packages (fallback for generic AMI)
+# ----------------------------------------------------------
+echo "Installing system packages..."
+apt-get update -y
+apt-get install -y git curl postgresql-client
+
+if ! command -v node &>/dev/null; then
+    echo "Node.js not found. Installing..."
+    curl -fsSL "https://deb.nodesource.com/setup_20.x" | bash -
+    apt-get install -y nodejs
+fi
+
+if ! command -v nginx &>/dev/null; then
+    echo "Nginx not found. Installing..."
+    apt-get install -y nginx
+    systemctl stop nginx 2>/dev/null || true
+fi
+
+if ! command -v pm2 &>/dev/null; then
+    echo "PM2 not found. Installing..."
+    npm install -g pm2@latest
+fi
+
+echo "Versions:"
+echo "  Node.js: $(node --version)"
+echo "  NPM: $(npm --version)"
+echo "  PM2: $(pm2 --version 2>/dev/null || echo 'not installed')"
 
 # ----------------------------------------------------------
 # Clone / Update Application Repository
 # ----------------------------------------------------------
-echo "=========================================="
 echo "Setting up application..."
-echo "=========================================="
 
 mkdir -p /home/ubuntu/notes-crud
 mkdir -p /home/ubuntu/notes-crud/logs
 chown -R ubuntu:ubuntu /home/ubuntu/notes-crud
 
-if [ -n "$${GITHUB_REPO:-}" ] && [ ! -d "/home/ubuntu/notes-crud/backend" ]; then
+if [ -n "$${GITHUB_REPO}" ] && [ ! -d "/home/ubuntu/notes-crud/backend" ]; then
     echo "Cloning repository..."
-    TEMP_DIR=$$(mktemp -d)
-    git clone -b "$${GITHUB_BRANCH:-main}" "$${GITHUB_REPO}" "$${TEMP_DIR}"
-    
+    TEMP_DIR=$(mktemp -d)
+    git clone -b "$${GITHUB_BRANCH}" "$${GITHUB_REPO}" "$${TEMP_DIR}"
+
+    mkdir -p /home/ubuntu/notes-crud/backend /home/ubuntu/notes-crud/frontend
     if [ -d "$${TEMP_DIR}/backend" ]; then
-        mv "$${TEMP_DIR}/backend" /home/ubuntu/notes-crud/
+        cp -r "$${TEMP_DIR}/backend"/* /home/ubuntu/notes-crud/backend/ 2>/dev/null || true
     fi
     if [ -d "$${TEMP_DIR}/frontend" ]; then
-        mv "$${TEMP_DIR}/frontend" /home/ubuntu/notes-crud/
+        cp -r "$${TEMP_DIR}/frontend"/* /home/ubuntu/notes-crud/frontend/ 2>/dev/null || true
     fi
     rm -rf "$${TEMP_DIR}"
     chown -R ubuntu:ubuntu /home/ubuntu/notes-crud
@@ -61,87 +90,148 @@ fi
 if [ -f "/home/ubuntu/notes-crud/backend/package.json" ]; then
     echo "Installing npm dependencies..."
     cd /home/ubuntu/notes-crud/backend
-    sudo -u ubuntu npm ci --production
+    sudo -u ubuntu npm ci --production || sudo -u ubuntu npm install --production
 fi
 
 # ----------------------------------------------------------
-# SSL Certificate Setup (Let's Encrypt / Self-signed)
+# Ensure Nginx HTTP-only configuration (Free Tier - no SSL)
 # ----------------------------------------------------------
-echo "=========================================="
-echo "Setting up SSL certificates..."
-echo "=========================================="
+NGINX_SITE="/etc/nginx/sites-available/notes-crud"
+if [ ! -f "$${NGINX_SITE}" ] || ! grep -q "listen 80" "$${NGINX_SITE}"; then
+    echo "Creating HTTP-only Nginx configuration..."
+    cat > "$${NGINX_SITE}" << 'NGINX_SITE_EOF'
+server {
+    listen 80;
+    server_name _;
 
-DOMAIN="$${DOMAIN_NAME:-}"
-EMAIL="$${SSL_EMAIL:-admin@localhost}"
+    location /health {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        access_log off;
+    }
 
-if [ -n "$${DOMAIN}" ] && [ "$${DOMAIN}" != "auto" ]; then
-    echo "Domain provided: $${DOMAIN}"
-    echo "Requesting Let's Encrypt certificate..."
-    
-    # Update nginx config with actual domain
-    sed -i "s/server_name _;/server_name $${DOMAIN};/g" /etc/nginx/sites-available/notes-crud
-    sed -i "s|/etc/letsencrypt/live/_/fullchain.pem|/etc/letsencrypt/live/$${DOMAIN}/fullchain.pem|g" /etc/nginx/sites-available/notes-crud
-    sed -i "s|/etc/letsencrypt/live/_/privkey.pem|/etc/letsencrypt/live/$${DOMAIN}/privkey.pem|g" /etc/nginx/sites-available/notes-crud
-    
-    # Start nginx for ACME challenge
-    nginx -t && systemctl start nginx
-    sleep 3
-    
-    certbot certonly \
-        --webroot \
-        --webroot-path=/var/www/certbot \
-        --email "$${EMAIL}" \
-        --agree-tos \
-        --no-eff-email \
-        --non-interactive \
-        -d "$${DOMAIN}" \
-        --expand
-    
-    if [ $$? -eq 0 ]; then
-        echo "Certificate obtained successfully!"
-        cat > /etc/cron.d/certbot-renew << 'CRON'
-0 */12 * * * root certbot renew --quiet --post-hook "systemctl reload nginx" >> /var/log/certbot-renew.log 2>&1
-CRON
-        echo "Auto-renewal cron job installed."
-    else
-        echo "WARNING: Let's Encrypt failed, falling back to self-signed certificate"
-        DOMAIN=""
-    fi
+    location /css/ {
+        alias /home/ubuntu/notes-crud/frontend/css/;
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+        access_log off;
+    }
+
+    location /js/ {
+        alias /home/ubuntu/notes-crud/frontend/js/;
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+        access_log off;
+    }
+
+    location /api/ {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+    }
+
+    location / {
+        root /home/ubuntu/notes-crud/frontend;
+        index index.html;
+        try_files $uri $uri/ /index.html;
+    }
+}
+NGINX_SITE_EOF
+
+    ln -sf "$${NGINX_SITE}" /etc/nginx/sites-enabled/
+    rm -f /etc/nginx/sites-enabled/default
+    echo "Nginx HTTP-only configuration created."
 fi
 
-if [ -z "$${DOMAIN}" ] || [ "$${DOMAIN}" = "auto" ]; then
-    echo "No domain provided or Let's Encrypt failed. Generating self-signed certificate..."
-    PUBLIC_IP=$$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4 2>/dev/null || echo "localhost")
-    openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-        -keyout /etc/ssl/private/nginx-selfsigned.key \
-        -out /etc/ssl/certs/nginx-selfsigned.crt \
-        -subj "/CN=$${PUBLIC_IP}" \
-        -addext "subjectAltName=IP:$${PUBLIC_IP}"
+# ----------------------------------------------------------
+# Fix file permissions for Nginx access
+# ----------------------------------------------------------
+echo "Fixing Nginx file permissions..."
+chmod o+x /home/ubuntu 2>/dev/null || true
+chmod -R o+rX /home/ubuntu/notes-crud 2>/dev/null || true
+echo "Permissions fixed."
+
+# ----------------------------------------------------------
+# Create .env file with database credentials
+# ----------------------------------------------------------
+echo "Creating .env file..."
+# Write .env file with actual values (unquoted heredoc allows shell expansion)
+cat > /home/ubuntu/notes-crud/backend/.env << ENVEOF
+DB_HOST=$${DB_HOST}
+DB_PORT=$${DB_PORT}
+DB_USER=$${DB_USER}
+DB_PASSWORD=$${DB_PASSWORD}
+DB_NAME=$${DB_NAME}
+NODE_ENV=production
+PORT=$${APP_PORT}
+ENVEOF
+chown ubuntu:ubuntu /home/ubuntu/notes-crud/backend/.env
+chmod 600 /home/ubuntu/notes-crud/backend/.env
+echo ".env file created with DB credentials."
+
+# ----------------------------------------------------------
+# Initialize Database Schema (idempotent - safe to run multiple times)
+# ----------------------------------------------------------
+if command -v psql &>/dev/null && [ -n "$${DB_HOST}" ]; then
+    echo "Initializing database schema..."
+    PGPASSWORD="$${DB_PASSWORD}" psql -h "$${DB_HOST}" -p "$${DB_PORT}" -U "$${DB_USER}" -d "$${DB_NAME}" -c "
+        CREATE TABLE IF NOT EXISTS notes (
+            id SERIAL PRIMARY KEY,
+            title VARCHAR(255) NOT NULL,
+            content TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+    " 2>&1 || echo "DB schema: table may already exist or psql not available"
     
-    sed -i "s|/etc/letsencrypt/live/_/fullchain.pem|/etc/ssl/certs/nginx-selfsigned.crt|g" /etc/nginx/sites-available/notes-crud
-    sed -i "s|/etc/letsencrypt/live/_/privkey.pem|/etc/ssl/private/nginx-selfsigned.key|g" /etc/nginx/sites-available/notes-crud
-    sed -i "s/server_name _;/server_name $${PUBLIC_IP};/g" /etc/nginx/sites-available/notes-crud
-    echo "Self-signed certificate generated for $${PUBLIC_IP}"
+    PGPASSWORD="$${DB_PASSWORD}" psql -h "$${DB_HOST}" -p "$${DB_PORT}" -U "$${DB_USER}" -d "$${DB_NAME}" -c "
+        CREATE INDEX IF NOT EXISTS idx_notes_created_at ON notes(created_at DESC);
+    " 2>&1 || echo "DB schema: index creation skipped"
+    
+    PGPASSWORD="$${DB_PASSWORD}" psql -h "$${DB_HOST}" -p "$${DB_PORT}" -U "$${DB_USER}" -d "$${DB_NAME}" -c "
+        INSERT INTO notes (title, content) 
+        SELECT 'Welcome to Notes CRUD', 'Your Notes CRUD application is deployed on AWS!'
+        WHERE NOT EXISTS (SELECT 1 FROM notes LIMIT 1);
+    " 2>&1 || echo "DB seed: sample data insertion skipped"
+    
+    echo "Database initialization complete."
+else
+    echo "psql not available or DB_HOST not set. Skipping DB init."
 fi
 
 # ----------------------------------------------------------
 # Start Services
 # ----------------------------------------------------------
-echo "=========================================="
 echo "Starting services..."
-echo "=========================================="
 
-nginx -t
-systemctl enable nginx
-systemctl restart nginx
+# Test and start Nginx
+nginx -t 2>/dev/null && systemctl enable nginx && systemctl restart nginx || echo "Nginx config test skipped/warning"
 
 # Start application with PM2
 cd /home/ubuntu/notes-crud
-if [ -f "backend/ecosystem.config.js" ]; then
-    sudo -u ubuntu pm2 start backend/ecosystem.config.js --env production
-    sudo -u ubuntu pm2 save
-    sudo -u ubuntu pm2 startup systemd -u ubuntu --hp /home/ubuntu
+if [ -f "ecosystem.config.js" ]; then
+    echo "Starting PM2 with ecosystem.config.js..."
+    sudo -u ubuntu pm2 start ecosystem.config.js --env production 2>/dev/null || sudo -u ubuntu pm2 start ecosystem.config.js --env production --update-env
+elif [ -f "backend/ecosystem.config.js" ]; then
+    echo "Starting PM2 with backend/ecosystem.config.js..."
+    sudo -u ubuntu pm2 start backend/ecosystem.config.js --env production 2>/dev/null || sudo -u ubuntu pm2 start backend/ecosystem.config.js --env production --update-env
+else
+    echo "Starting PM2 with server.js directly..."
+    sudo -u ubuntu pm2 delete notes-crud 2>/dev/null || true
+    sudo -u ubuntu env "PORT=$${APP_PORT}" pm2 start /home/ubuntu/notes-crud/backend/src/server.js --name notes-crud --update-env
 fi
+sudo -u ubuntu pm2 save
+sudo -u ubuntu pm2 startup systemd -u ubuntu --hp /home/ubuntu 2>/dev/null || true
+sudo -u ubuntu pm2 restart notes-crud 2>/dev/null || true
 
 # Start CloudWatch Agent if enabled
 if [ "$${ENABLE_CLOUDWATCH_AGENT}" = "true" ]; then
@@ -149,14 +239,13 @@ if [ "$${ENABLE_CLOUDWATCH_AGENT}" = "true" ]; then
         -a fetch-config \
         -m ec2 \
         -c file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json \
-        -s
-    systemctl enable amazon-cloudwatch-agent
+        -s 2>/dev/null || true
 fi
 
-# Start SSM Agent if enabled
+# Start SSM Agent if enabled (already running from AMI)
 if [ "$${ENABLE_SSM_AGENT}" = "true" ]; then
-    systemctl enable snap.amazon-ssm-agent.amazon-ssm-agent
-    systemctl start snap.amazon-ssm-agent.amazon-ssm-agent
+    systemctl enable amazon-ssm-agent 2>/dev/null || true
+    systemctl start amazon-ssm-agent 2>/dev/null || systemctl start snap.amazon-ssm-agent.amazon-ssm-agent 2>/dev/null || true
 fi
 
 # ----------------------------------------------------------
@@ -165,25 +254,12 @@ fi
 echo "=========================================="
 echo "Bootstrap Complete!"
 echo "=========================================="
-echo "Timestamp: $$(date)"
-INSTANCE_ID=$$(curl -s http://169.254.169.254/latest/meta-data/instance-id 2>/dev/null || echo "unknown")
-AZ=$$(curl -s http://169.254.169.254/latest/meta-data/placement/availability-zone 2>/dev/null || echo "unknown")
-PUBLIC_IP=$$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4 2>/dev/null || echo "none")
-echo "Instance ID: $${INSTANCE_ID}"
-echo "Availability Zone: $${AZ}"
-echo "Public IP: $${PUBLIC_IP}"
-echo ""
+echo "Timestamp: $(date)"
 echo "Installed Versions:"
-echo "  Node.js: $$(node --version 2>/dev/null || echo 'not installed')"
-echo "  NPM: $$(npm --version 2>/dev/null || echo 'not installed')"
-echo "  PM2: $$(pm2 --version 2>/dev/null || echo 'not installed')"
-echo "  Nginx: $$(nginx -v 2>&1 | head -1)"
-echo "  Certbot: $$(certbot --version 2>&1 | head -1)"
+echo "  Node.js: $(node --version 2>/dev/null || echo 'not installed')"
+echo "  NPM: $(npm --version 2>/dev/null || echo 'not installed')"
+echo "  PM2: $(pm2 --version 2>/dev/null || echo 'not installed')"
+echo "  Nginx: $(nginx -v 2>&1 | head -1)"
 echo ""
 echo "Application Directory: /home/ubuntu/notes-crud"
-echo "PM2 Config: /home/ubuntu/notes-crud/backend/ecosystem.config.js"
-echo "Start Script: /home/ubuntu/notes-crud/start.sh"
-echo "Health Check: /home/ubuntu/notes-crud/health.sh"
-echo "Nginx Config: /etc/nginx/sites-available/notes-crud"
-echo "SSL Certs: /etc/letsencrypt/live/ or /etc/ssl/certs/nginx-selfsigned.crt"
 echo "=========================================="

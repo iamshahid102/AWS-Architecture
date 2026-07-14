@@ -46,9 +46,9 @@ resource "aws_db_instance" "notes_crud" {
   deletion_protection     = var.deletion_protection
   skip_final_snapshot     = true # Free Tier: no final snapshot
 
-  # Monitoring
-  monitoring_interval = 60
-  monitoring_role_arn = aws_iam_role.enhanced_monitoring.arn
+  # Monitoring (disabled for Free Tier - Enhanced Monitoring costs extra)
+  monitoring_interval = 0
+  monitoring_role_arn = ""
 
   tags = merge(local.common_tags, {
     Name = local.db_instance_name
@@ -59,25 +59,4 @@ resource "aws_db_instance" "notes_crud" {
       password,
     ]
   }
-}
-
-# IAM Role for Enhanced Monitoring
-resource "aws_iam_role" "enhanced_monitoring" {
-  name = "${var.environment}-rds-enhanced-monitoring"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Action = "sts:AssumeRole"
-      Effect = "Allow"
-      Principal = {
-        Service = "monitoring.rds.amazonaws.com"
-      }
-    }]
-  })
-}
-
-resource "aws_iam_role_policy_attachment" "enhanced_monitoring" {
-  role       = aws_iam_role.enhanced_monitoring.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonRDSEnhancedMonitoringRole"
 }

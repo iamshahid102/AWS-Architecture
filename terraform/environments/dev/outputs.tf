@@ -257,69 +257,35 @@ output "rds_arn" {
 }
 
 # ============================================================
-# PHASE 4 OUTPUTS: Auto Scaling Group
+# PHASE 4 OUTPUTS: EC2 Instance + Elastic IP (100% Free Tier)
 # ============================================================
 
-output "asg_name" {
-  description = "Auto Scaling Group Name"
-  value       = module.autoscaling.asg_name
+output "instance_id" {
+  description = "EC2 Instance ID"
+  value       = module.ec2.instance_id
 }
 
-output "asg_arn" {
-  description = "Auto Scaling Group ARN"
-  value       = module.autoscaling.asg_arn
+output "instance_public_ip" {
+  description = "EC2 Instance Public IP (without EIP)"
+  value       = module.ec2.instance_public_ip
 }
 
-output "asg_desired_capacity" {
-  description = "ASG Desired Capacity"
-  value       = module.autoscaling.asg_desired_capacity
+output "instance_private_ip" {
+  description = "EC2 Instance Private IP"
+  value       = module.ec2.instance_private_ip
 }
 
-output "asg_min_size" {
-  description = "ASG Minimum Size"
-  value       = module.autoscaling.asg_min_size
+output "eip_public_ip" {
+  description = "Elastic IP for EC2 instance (static public IP)"
+  value       = aws_eip.notes_crud.public_ip
 }
 
-output "asg_max_size" {
-  description = "ASG Maximum Size"
-  value       = module.autoscaling.asg_max_size
+output "application_url" {
+  description = "Application URL (HTTP via Elastic IP)"
+  value       = "http://${aws_eip.notes_crud.public_ip}"
 }
 
-# ============================================================
-# PHASE 5 OUTPUTS: Application Load Balancer
-# ============================================================
-
-output "alb_arn" {
-  description = "ALB ARN"
-  value       = module.alb.alb_arn
-}
-
-output "alb_dns_name" {
-  description = "ALB DNS Name"
-  value       = module.alb.alb_dns_name
-}
-
-output "alb_zone_id" {
-  description = "ALB Hosted Zone ID"
-  value       = module.alb.alb_zone_id
-}
-
-output "alb_url" {
-  description = "ALB HTTP URL"
-  value       = "http://${module.alb.alb_dns_name}"
-}
-
-output "target_group_arn" {
-  description = "ALB Target Group ARN"
-  value       = module.alb.target_group_arn
-}
-
-output "http_listener_arn" {
-  description = "ALB HTTP Listener ARN"
-  value       = module.alb.http_listener_arn
-}
-
-output "https_listener_arn" {
-  description = "ALB HTTPS Listener ARN (conditional)"
-  value       = module.alb.https_listener_arn
+output "ssh_command" {
+  description = "SSH command to connect to the instance"
+  value       = "ssh -i notes_app.pem ubuntu@${aws_eip.notes_crud.public_ip}"
 }
