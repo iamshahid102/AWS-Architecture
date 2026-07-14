@@ -11,21 +11,21 @@ echo "Starting Notes CRUD EC2 Runtime Setup"
 echo "Timestamp: $$(date)"
 echo "=========================================="
 
-# Environment Variables (passed from Terraform template)
-APP_PORT="$${app_port}"
-ENVIRONMENT="$${environment}"
-AWS_REGION="$${aws_region}"
-ENABLE_CLOUDWATCH_AGENT="$${enable_cloudwatch_agent}"
-ENABLE_SSM_AGENT="$${enable_ssm_agent}"
-GITHUB_REPO="$${github_repo}"
-GITHUB_BRANCH="$${github_branch}"
-DOMAIN_NAME="$${domain_name}"
-SSL_EMAIL="$${ssl_email}"
+# Environment Variables (passed from Terraform template - these use $${var} for Terraform interpolation)
+APP_PORT="${app_port}"
+ENVIRONMENT="${environment}"
+AWS_REGION="${aws_region}"
+ENABLE_CLOUDWATCH_AGENT="${enable_cloudwatch_agent}"
+ENABLE_SSM_AGENT="${enable_ssm_agent}"
+GITHUB_REPO="${github_repo}"
+GITHUB_BRANCH="${github_branch}"
+DOMAIN_NAME="${domain_name}"
+SSL_EMAIL="${ssl_email}"
 
 echo "Configuration:"
-echo "  App Port: $$APP_PORT"
-echo "  Environment: $$ENVIRONMENT"
-echo "  AWS Region: $$AWS_REGION"
+echo "  App Port: $${APP_PORT}"
+echo "  Environment: $${ENVIRONMENT}"
+echo "  AWS Region: $${AWS_REGION}"
 echo "  GitHub Repo: $${GITHUB_REPO:-none}"
 echo "  Domain: $${DOMAIN_NAME:-none (self-signed)}"
 
@@ -43,15 +43,15 @@ chown -R ubuntu:ubuntu /home/ubuntu/notes-crud
 if [ -n "$${GITHUB_REPO:-}" ] && [ ! -d "/home/ubuntu/notes-crud/backend" ]; then
     echo "Cloning repository..."
     TEMP_DIR=$$(mktemp -d)
-    git clone -b "$${GITHUB_BRANCH:-main}" "$${GITHUB_REPO}" "$$TEMP_DIR"
+    git clone -b "$${GITHUB_BRANCH:-main}" "$${GITHUB_REPO}" "$${TEMP_DIR}"
     
-    if [ -d "$$TEMP_DIR/backend" ]; then
-        mv "$$TEMP_DIR/backend" /home/ubuntu/notes-crud/
+    if [ -d "$${TEMP_DIR}/backend" ]; then
+        mv "$${TEMP_DIR}/backend" /home/ubuntu/notes-crud/
     fi
-    if [ -d "$$TEMP_DIR/frontend" ]; then
-        mv "$$TEMP_DIR/frontend" /home/ubuntu/notes-crud/
+    if [ -d "$${TEMP_DIR}/frontend" ]; then
+        mv "$${TEMP_DIR}/frontend" /home/ubuntu/notes-crud/
     fi
-    rm -rf "$$TEMP_DIR"
+    rm -rf "$${TEMP_DIR}"
     chown -R ubuntu:ubuntu /home/ubuntu/notes-crud
 fi
 
@@ -74,14 +74,14 @@ echo "=========================================="
 DOMAIN="$${DOMAIN_NAME:-}"
 EMAIL="$${SSL_EMAIL:-admin@localhost}"
 
-if [ -n "$$DOMAIN" ] && [ "$$DOMAIN" != "auto" ]; then
-    echo "Domain provided: $$DOMAIN"
+if [ -n "$${DOMAIN}" ] && [ "$${DOMAIN}" != "auto" ]; then
+    echo "Domain provided: $${DOMAIN}"
     echo "Requesting Let's Encrypt certificate..."
     
     # Update nginx config with actual domain
-    sed -i "s/server_name _;/server_name $$DOMAIN;/g" /etc/nginx/sites-available/notes-crud
-    sed -i "s|/etc/letsencrypt/live/_/fullchain.pem|/etc/letsencrypt/live/$$DOMAIN/fullchain.pem|g" /etc/nginx/sites-available/notes-crud
-    sed -i "s|/etc/letsencrypt/live/_/privkey.pem|/etc/letsencrypt/live/$$DOMAIN/privkey.pem|g" /etc/nginx/sites-available/notes-crud
+    sed -i "s/server_name _;/server_name $${DOMAIN};/g" /etc/nginx/sites-available/notes-crud
+    sed -i "s|/etc/letsencrypt/live/_/fullchain.pem|/etc/letsencrypt/live/$${DOMAIN}/fullchain.pem|g" /etc/nginx/sites-available/notes-crud
+    sed -i "s|/etc/letsencrypt/live/_/privkey.pem|/etc/letsencrypt/live/$${DOMAIN}/privkey.pem|g" /etc/nginx/sites-available/notes-crud
     
     # Start nginx for ACME challenge
     nginx -t && systemctl start nginx
@@ -90,11 +90,11 @@ if [ -n "$$DOMAIN" ] && [ "$$DOMAIN" != "auto" ]; then
     certbot certonly \
         --webroot \
         --webroot-path=/var/www/certbot \
-        --email "$$EMAIL" \
+        --email "$${EMAIL}" \
         --agree-tos \
         --no-eff-email \
         --non-interactive \
-        -d "$$DOMAIN" \
+        -d "$${DOMAIN}" \
         --expand
     
     if [ $$? -eq 0 ]; then
@@ -109,19 +109,19 @@ CRON
     fi
 fi
 
-if [ -z "$$DOMAIN" ] || [ "$$DOMAIN" = "auto" ]; then
+if [ -z "$${DOMAIN}" ] || [ "$${DOMAIN}" = "auto" ]; then
     echo "No domain provided or Let's Encrypt failed. Generating self-signed certificate..."
     PUBLIC_IP=$$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4 2>/dev/null || echo "localhost")
     openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
         -keyout /etc/ssl/private/nginx-selfsigned.key \
         -out /etc/ssl/certs/nginx-selfsigned.crt \
-        -subj "/CN=$$PUBLIC_IP" \
-        -addext "subjectAltName=IP:$$PUBLIC_IP"
+        -subj "/CN=$${PUBLIC_IP}" \
+        -addext "subjectAltName=IP:$${PUBLIC_IP}"
     
     sed -i "s|/etc/letsencrypt/live/_/fullchain.pem|/etc/ssl/certs/nginx-selfsigned.crt|g" /etc/nginx/sites-available/notes-crud
     sed -i "s|/etc/letsencrypt/live/_/privkey.pem|/etc/ssl/private/nginx-selfsigned.key|g" /etc/nginx/sites-available/notes-crud
-    sed -i "s/server_name _;/server_name $$PUBLIC_IP;/g" /etc/nginx/sites-available/notes-crud
-    echo "Self-signed certificate generated for $$PUBLIC_IP"
+    sed -i "s/server_name _;/server_name $${PUBLIC_IP};/g" /etc/nginx/sites-available/notes-crud
+    echo "Self-signed certificate generated for $${PUBLIC_IP}"
 fi
 
 # ----------------------------------------------------------
@@ -144,7 +144,7 @@ if [ -f "backend/ecosystem.config.js" ]; then
 fi
 
 # Start CloudWatch Agent if enabled
-if [ "$$ENABLE_CLOUDWATCH_AGENT" = "true" ]; then
+if [ "$${ENABLE_CLOUDWATCH_AGENT}" = "true" ]; then
     /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl \
         -a fetch-config \
         -m ec2 \
@@ -154,7 +154,7 @@ if [ "$$ENABLE_CLOUDWATCH_AGENT" = "true" ]; then
 fi
 
 # Start SSM Agent if enabled
-if [ "$$ENABLE_SSM_AGENT" = "true" ]; then
+if [ "$${ENABLE_SSM_AGENT}" = "true" ]; then
     systemctl enable snap.amazon-ssm-agent.amazon-ssm-agent
     systemctl start snap.amazon-ssm-agent.amazon-ssm-agent
 fi
@@ -169,9 +169,9 @@ echo "Timestamp: $$(date)"
 INSTANCE_ID=$$(curl -s http://169.254.169.254/latest/meta-data/instance-id 2>/dev/null || echo "unknown")
 AZ=$$(curl -s http://169.254.169.254/latest/meta-data/placement/availability-zone 2>/dev/null || echo "unknown")
 PUBLIC_IP=$$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4 2>/dev/null || echo "none")
-echo "Instance ID: $$INSTANCE_ID"
-echo "Availability Zone: $$AZ"
-echo "Public IP: $$PUBLIC_IP"
+echo "Instance ID: $${INSTANCE_ID}"
+echo "Availability Zone: $${AZ}"
+echo "Public IP: $${PUBLIC_IP}"
 echo ""
 echo "Installed Versions:"
 echo "  Node.js: $$(node --version 2>/dev/null || echo 'not installed')"

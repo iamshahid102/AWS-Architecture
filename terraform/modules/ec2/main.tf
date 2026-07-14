@@ -48,12 +48,10 @@ data "aws_ami" "ubuntu_2404" {
 
 # -----------------------------------------------------------
 # User Data Template
-# Renders userdata.sh with variable interpolation
+# Renders userdata.sh with variable interpolation using templatefile()
 # -----------------------------------------------------------
-data "template_file" "user_data" {
-  template = file("${path.module}/userdata.sh")
-
-  vars = {
+locals {
+  user_data = templatefile("${path.module}/userdata.sh", {
     environment                = var.environment
     app_port                   = var.app_port
     node_version               = var.node_version
@@ -65,7 +63,7 @@ data "template_file" "user_data" {
     github_branch              = var.github_branch
     domain_name                = var.domain_name
     ssl_email                  = var.ssl_email
-  }
+  })
 }
 
 # -----------------------------------------------------------
@@ -83,7 +81,7 @@ resource "aws_launch_template" "notes_crud" {
     arn = var.instance_profile_arn
   }
 
-  user_data = base64encode(data.template_file.user_data.rendered)
+  user_data = base64encode(local.user_data)
 
   update_default_version = true
 
