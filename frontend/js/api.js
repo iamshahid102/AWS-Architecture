@@ -4,9 +4,10 @@
 
 /**
  * API configuration
- * Update API_BASE_URL to match your backend server address.
+ * Using relative path '/api' since Nginx proxies from same origin.
+ * No hardcoded domain/port needed - works on any domain/IP.
  */
-const API_BASE_URL = 'http://localhost:5000/api';
+const API_BASE_URL = '/api';
 
 /**
  * Generic request handler with error normalization.

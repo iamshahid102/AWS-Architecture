@@ -1,23 +1,12 @@
-# vpc module
-
 resource "aws_vpc" "this" {
-
-  cidr_block = var.vpc_cidr
-
-  enable_dns_support = true
-
+  cidr_block           = var.vpc_cidr
+  enable_dns_support   = true
   enable_dns_hostnames = true
 
   tags = {
-
-    Name = "${var.environment}-vpc"
-
+    Name        = "${var.environment}-vpc"
     Environment = var.environment
-
-    Terraform = "true"
-
+    Terraform   = "true"
+    ManagedBy   = "terraform"
   }
-
 }
-
-

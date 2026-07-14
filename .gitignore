@@ -1,0 +1,54 @@
+# Root .gitignore - Notes CRUD Application
+
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Environment files - NEVER commit
+.env
+.env.local
+.env.*.local
+.env.production
+*.text
+
+# Build outputs
+dist/
+build/
+**/dist/
+**/build/
+
+# Terraform
+terraform/**/*.tfstate
+terraform/**/*.tfstate.*
+terraform/**/*.tfvars
+terraform/**/*.tfplan
+terraform/.terraform/
+terraform/.terraform.lock.hcl
+
+# AWS / Secrets
+*.pem
+*.key
+AWS-IAM-User-Access.text
+*.text
+
+# IDE/Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+npm-debug.log*
+
+# Test coverage
+coverage/
+**/coverage/
+
+# PM2
+.pm2/

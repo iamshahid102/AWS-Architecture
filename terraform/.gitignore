@@ -1,0 +1,27 @@
+# Terraform - NEVER commit state or secrets
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.tfplan
+*.tfvars.json
+
+# Terraform lock file (commit this for consistency)
+.terraform.lock.hcl
+
+# Terraform cache directory
+.terraform/
+
+# AWS credentials
+*.pem
+*.key
+AWS-IAM-User-Access.text
+
+# IDE/Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
