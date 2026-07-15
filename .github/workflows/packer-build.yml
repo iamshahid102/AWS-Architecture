@@ -189,18 +189,14 @@ jobs:
       - name: Get Application URL
         id: url
         run: |
-          APP_URL=$(terraform output -raw application_url 2>/dev/null || true)
-          if [ -z "$APP_URL" ]; then
-            APP_URL=$(terraform output -raw eip_public_ip 2>/dev/null || echo "unknown")
-            APP_URL="http://${APP_URL}"
-          fi
+          APP_URL=$(terraform output -raw alb_url 2>/dev/null || echo "unknown")
           echo "app_url=$APP_URL" >> $GITHUB_OUTPUT
           echo "✅ Application deployed at: $APP_URL"
 
       - name: Health Check
         id: health
         run: |
-          APP_URL=$(terraform output -raw eip_public_ip 2>/dev/null || echo "unknown")
+          APP_URL=$(terraform output -raw alb_dns_name 2>/dev/null || echo "unknown")
           sleep 60
           for i in {1..12}; do
             STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://${APP_URL}/health" 2>/dev/null || echo "000")

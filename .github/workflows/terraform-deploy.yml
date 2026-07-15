@@ -82,5 +82,5 @@ jobs:
         if: github.event.inputs.action == 'apply'
         run: |
           echo "=========================================="
-          echo "  Application URL: http://$(terraform output -raw eip_public_ip 2>/dev/null || echo 'unknown')"
+          echo "  Application URL: $(terraform output -raw alb_url 2>/dev/null || echo 'http://'$(terraform output -raw eip_public_ip 2>/dev/null || echo 'unknown'))"
           echo "=========================================="

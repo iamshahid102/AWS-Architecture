@@ -83,19 +83,6 @@ output "nat_eip_public_ip" {
 }
 
 # -----------------------------------------------------------
-# Route Tables
-# -----------------------------------------------------------
-output "public_route_table_id" {
-  description = "The ID of the public route table"
-  value       = module.route_tables.public_route_table_id
-}
-
-output "private_route_table_id" {
-  description = "The ID of the private route table"
-  value       = module.route_tables.private_route_table_id
-}
-
-# -----------------------------------------------------------
 # Availability Zones
 # -----------------------------------------------------------
 output "availability_zones" {
@@ -189,8 +176,103 @@ output "iam_role_policy_name" {
 }
 
 # -----------------------------------------------------------
-# EC2 Launch Template
+# Route Tables
 # -----------------------------------------------------------
+output "public_route_table_id" {
+  description = "The ID of the public route table"
+  value       = module.route_tables.public_route_table_id
+}
+
+output "private_route_table_id" {
+  description = "The ID of the private route table"
+  value       = module.route_tables.private_route_table_id
+}
+
+# -----------------------------------------------------------
+# Application Load Balancer (Free Tier)
+# -----------------------------------------------------------
+output "alb_arn" {
+  description = "ARN of the Application Load Balancer"
+  value       = module.alb.alb_arn
+}
+
+output "alb_dns_name" {
+  description = "DNS name of the Application Load Balancer"
+  value       = module.alb.alb_dns_name
+}
+
+output "alb_zone_id" {
+  description = "Zone ID of the Application Load Balancer"
+  value       = module.alb.alb_zone_id
+}
+
+output "target_group_arn" {
+  description = "ARN of the Target Group"
+  value       = module.alb.target_group_arn
+}
+
+output "alb_url" {
+  description = "Application URL via ALB (HTTP)"
+  value       = "http://${module.alb.alb_dns_name}"
+}
+
+# -----------------------------------------------------------
+# Auto Scaling Group (Free Tier: min=1, max=1)
+# -----------------------------------------------------------
+output "asg_arn" {
+  description = "Auto Scaling Group ARN"
+  value       = module.autoscaling.asg_arn
+}
+
+output "asg_name" {
+  description = "Auto Scaling Group Name"
+  value       = module.autoscaling.asg_name
+}
+
+output "asg_desired_capacity" {
+  description = "ASG Desired Capacity"
+  value       = module.autoscaling.asg_desired_capacity
+}
+
+output "asg_min_size" {
+  description = "ASG Minimum Size"
+  value       = module.autoscaling.asg_min_size
+}
+
+output "asg_max_size" {
+  description = "ASG Maximum Size"
+  value       = module.autoscaling.asg_max_size
+}
+
+# ============================================================
+# PHASE 3 OUTPUTS: RDS Database
+# ============================================================
+
+output "rds_instance_id" {
+  description = "RDS Instance Identifier"
+  value       = module.rds.db_instance_id
+}
+
+output "rds_endpoint" {
+  description = "RDS Instance Endpoint (host:port)"
+  value       = module.rds.db_endpoint
+  sensitive   = true
+}
+
+output "rds_port" {
+  description = "RDS Instance Port"
+  value       = module.rds.db_port
+}
+
+output "rds_arn" {
+  description = "RDS Instance ARN"
+  value       = module.rds.db_arn
+}
+
+# ============================================================
+# EC2 Launch Template (for ASG)
+# ============================================================
+
 output "launch_template_id" {
   description = "Launch Template ID"
   value       = module.ec2.launch_template_id
@@ -229,63 +311,4 @@ output "ami_name" {
 output "instance_type" {
   description = "Instance type used in launch template"
   value       = module.ec2.instance_type
-}
-
-# ============================================================
-# PHASE 3 OUTPUTS: RDS Database
-# ============================================================
-
-output "rds_instance_id" {
-  description = "RDS Instance Identifier"
-  value       = module.rds.db_instance_id
-}
-
-output "rds_endpoint" {
-  description = "RDS Instance Endpoint (host:port)"
-  value       = module.rds.db_endpoint
-  sensitive   = true
-}
-
-output "rds_port" {
-  description = "RDS Instance Port"
-  value       = module.rds.db_port
-}
-
-output "rds_arn" {
-  description = "RDS Instance ARN"
-  value       = module.rds.db_arn
-}
-
-# ============================================================
-# PHASE 4 OUTPUTS: EC2 Instance + Elastic IP (100% Free Tier)
-# ============================================================
-
-output "instance_id" {
-  description = "EC2 Instance ID"
-  value       = module.ec2.instance_id
-}
-
-output "instance_public_ip" {
-  description = "EC2 Instance Public IP (without EIP)"
-  value       = module.ec2.instance_public_ip
-}
-
-output "instance_private_ip" {
-  description = "EC2 Instance Private IP"
-  value       = module.ec2.instance_private_ip
-}
-
-output "eip_public_ip" {
-  description = "Elastic IP for EC2 instance (static public IP)"
-  value       = aws_eip.notes_crud.public_ip
-}
-
-output "application_url" {
-  description = "Application URL (HTTP via Elastic IP)"
-  value       = "http://${aws_eip.notes_crud.public_ip}"
-}
-
-output "ssh_command" {
-  description = "SSH command to connect to the instance"
-  value       = "ssh -i notes_app.pem ubuntu@${aws_eip.notes_crud.public_ip}"
 }

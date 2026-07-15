@@ -107,19 +107,6 @@ module "security_group" {
 }
 
 # -----------------------------------------------------------
-# Elastic IP for EC2 Instance (static public IP - Free Tier)
-# -----------------------------------------------------------
-resource "aws_eip" "notes_crud" {
-  domain = "vpc"
-  tags = {
-    Name        = "${var.environment}-notes-crud-eip"
-    Environment = var.environment
-    Project     = "notes-crud"
-    ManagedBy   = "terraform"
-  }
-}
-
-# -----------------------------------------------------------
 # IAM Role, Policy Attachments, Instance Profile
 # For EC2 instances (CloudWatch Agent, SSM, EC2 Read, Logs)
 # -----------------------------------------------------------
@@ -168,16 +155,42 @@ module "ec2" {
   db_user                           = var.db_username
   db_password                       = var.db_password
   db_name                           = var.db_name
-  create_instance                   = true
+  create_instance                   = false
   instance_name                     = "${var.environment}-notes-crud-instance"
 }
 
 # -----------------------------------------------------------
-# Elastic IP Association (static public IP for Free Tier)
+# Application Load Balancer (Free Tier: 750 hrs/month)
 # -----------------------------------------------------------
-resource "aws_eip_association" "notes_crud" {
-  instance_id   = module.ec2.instance_id
-  allocation_id = aws_eip.notes_crud.id
+module "alb" {
+  source = "../../modules/alb"
+
+  vpc_id                = module.vpc.vpc_id
+  public_subnet_ids     = module.subnets.public_subnet_ids
+  alb_security_group_id = module.security_group.alb_security_group_id
+  environment           = var.environment
+  owner                 = var.owner
+  acm_certificate_arn   = ""
+}
+
+# -----------------------------------------------------------
+# Auto Scaling Group (Free Tier: min=1, max=1)
+# Uses Launch Template from EC2 module
+# -----------------------------------------------------------
+module "autoscaling" {
+  source = "../../modules/autoscaling"
+
+  launch_template_id        = module.ec2.launch_template_id
+  launch_template_version   = module.ec2.launch_template_latest_version
+  vpc_zone_identifier       = module.subnets.public_subnet_ids
+  target_group_arns         = [module.alb.target_group_arn]
+  health_check_type         = "ELB"
+  health_check_grace_period = 300
+  min_size                  = 1
+  max_size                  = 1
+  desired_capacity          = 1
+  environment               = var.environment
+  owner                     = var.owner
 }
 
 # ============================================================
